@@ -35,6 +35,16 @@ fun EmployeeRole.labelFa(): String = when (this) {
     EmployeeRole.OTHER -> "سایر"
 }
 
+internal enum class PersonnelDetailItemSection(val keyPrefix: String) {
+    ACCOUNT("account"),
+    EMPLOYMENT("employment"),
+    ABSENCE("absence"),
+    HISTORY("history"),
+}
+
+internal fun personnelDetailItemKey(section: PersonnelDetailItemSection, rawId: String): String =
+    "${section.keyPrefix}:$rawId"
+
 @Composable
 fun PersonnelScreen(viewModel: AppViewModel, nav: NavController) {
     val employees by viewModel.employees.collectAsState()
@@ -115,7 +125,7 @@ fun PersonnelDetailScreen(viewModel: AppViewModel, employeeId: Long, nav: NavCon
             }
         }
         item { SectionTitle("کارت‌ها و پول نقد", "افزودن کارت") { nav.navigate("employee/$employeeId/card") } }
-        items(accounts, key = { it.id }) { account ->
+        items(accounts, key = { personnelDetailItemKey(PersonnelDetailItemSection.ACCOUNT, it.id.toString()) }) { account ->
             Card(Modifier.padding(horizontal = 20.dp).fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
                 Row(Modifier.padding(15.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(if (account.type == AccountType.CARD) Icons.Rounded.CreditCard else Icons.Rounded.Payments, null, tint = MaterialTheme.colorScheme.secondary)
@@ -144,16 +154,16 @@ fun PersonnelDetailScreen(viewModel: AppViewModel, employeeId: Long, nav: NavCon
                 else TextButton({ nav.navigate("employee/$employeeId/employment") }) { Text("افزودن دوره") }
             }
         }
-        items(employment, key = { it.id }) { period -> TimelineCard(Icons.Rounded.Work, "همکاری", "از ${PersianDate.fromEpochDay(period.startEpochDay).format()} تا ${period.endEpochDay?.let(PersianDate::fromEpochDay)?.format() ?: "ادامه دارد"}") }
+        items(employment, key = { personnelDetailItemKey(PersonnelDetailItemSection.EMPLOYMENT, it.id.toString()) }) { period -> TimelineCard(Icons.Rounded.Work, "همکاری", "از ${PersianDate.fromEpochDay(period.startEpochDay).format()} تا ${period.endEpochDay?.let(PersianDate::fromEpochDay)?.format() ?: "ادامه دارد"}") }
         item { SectionTitle("غیبت‌های موقت", "ثبت غیبت") { nav.navigate("employee/$employeeId/absence") } }
         if (absences.isEmpty()) item { EmptyState("غیبتی ثبت نشده", "این شخص در دوره‌های همکاری حاضر محسوب می‌شود.") }
-        else items(absences, key = { it.id }) { absence ->
+        else items(absences, key = { personnelDetailItemKey(PersonnelDetailItemSection.ABSENCE, it.id.toString()) }) { absence ->
             val text = "از ${PersianDate.fromEpochDay(absence.startEpochDay).format()} تا ${absence.returnEpochDay?.let(PersianDate::fromEpochDay)?.format() ?: "بازگشت ثبت نشده"}"
             TimelineCard(Icons.Rounded.EventBusy, "غیبت موقت", text + if (absence.note.isBlank()) "" else " • ${absence.note}")
         }
         item { SectionTitle("حساب و تاریخچه سال", null, null) }
         if (history.isEmpty()) item { EmptyState("هنوز سابقه مالی ندارد", "سهم‌ها، دریافت امانت، انتقال و تسویه اینجا نمایش داده می‌شوند.") }
-        else items(history.take(50), key = { it.rowId }) { row -> HistoryCard(row) { row.sourceIncomeEventId?.let { nav.navigate("income/$it") } } }
+        else items(history.take(50), key = { personnelDetailItemKey(PersonnelDetailItemSection.HISTORY, it.rowId) }) { row -> HistoryCard(row) { row.sourceIncomeEventId?.let { nav.navigate("income/$it") } } }
     }
     if (showEndEmployment) EndEmploymentDialog(viewModel, employeeId, { showEndEmployment = false }) { showEndEmployment = false }
 }
