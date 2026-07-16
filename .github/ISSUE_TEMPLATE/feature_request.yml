@@ -1,0 +1,32 @@
+name: Feature request
+description: Propose a focused product or engineering improvement
+title: "[Feature]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What real workflow is difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: accounting
+    attributes:
+      label: Accounting or privacy impact
+      description: Explain any effect on claims, custody, settlement, year closing, backups, or personal data.
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Project constraints
+      options:
+        - label: The proposal can work completely offline.
+          required: true
+        - label: The proposal preserves Persian RTL usability.
+          required: true
