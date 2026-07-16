@@ -1,0 +1,31 @@
+# Android Studio
+*.iml
+.idea/
+captures/
+
+# Gradle and Kotlin
+.gradle/
+.kotlin/
+**/build/
+
+# Machine-local Android SDK configuration
+local.properties
+
+# Native build output
+.externalNativeBuild/
+.cxx/
+
+# Signing material — never commit private keys or credentials
+*.jks
+*.keystore
+keystore.properties
+
+# Release binaries belong in GitHub Releases, not Git history
+release/*.apk
+release/*.aab
+
+# OS and tooling noise
+.DS_Store
+Thumbs.db
+*.log
+*.hprof

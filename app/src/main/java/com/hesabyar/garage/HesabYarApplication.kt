@@ -1,0 +1,26 @@
+package com.hesabyar.garage
+
+import android.app.Application
+import com.hesabyar.garage.data.GarageRepository
+import com.hesabyar.garage.data.BackupService
+import com.hesabyar.garage.data.SettingsRepository
+import com.hesabyar.garage.data.local.GarageDatabase
+import com.hesabyar.garage.security.CardCrypto
+
+class HesabYarApplication : Application() {
+    lateinit var container: AppContainer
+        private set
+
+    override fun onCreate() {
+        super.onCreate()
+        container = AppContainer(this)
+    }
+}
+
+class AppContainer(application: Application) {
+    val database: GarageDatabase = GarageDatabase.create(application)
+    val cardCrypto = CardCrypto()
+    val garageRepository = GarageRepository(database, cardCrypto)
+    val settingsRepository = SettingsRepository(application)
+    val backupService = BackupService(application, database, settingsRepository, cardCrypto)
+}
