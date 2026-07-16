@@ -83,8 +83,8 @@ Before tagging:
 Create and push an annotated semantic-version tag:
 
 ```bash
-git tag -a v1.0.0 -m "HesabYar Garage 1.0.0"
-git push origin v1.0.0
+git tag -a v1.0.1 -m "HesabYar Garage 1.0.1"
+git push origin v1.0.1
 ```
 
 The `Publish signed APK` workflow will:
@@ -94,7 +94,7 @@ The `Publish signed APK` workflow will:
 3. build a minified, signed Release APK;
 4. verify the APK signature;
 5. generate `SHA256SUMS.txt`;
-6. publish `HesabYar-Garage-v1.0.0.apk` and `HesabYar-Garage-latest.apk` as Release assets.
+6. publish `HesabYar-Garage-v1.0.1.apk` and `HesabYar-Garage-latest.apk` as Release assets.
 
 After the workflow succeeds, the README download link resolves directly to:
 
@@ -102,22 +102,22 @@ After the workflow succeeds, the README download link resolves directly to:
 https://github.com/<your-username>/hesabyar-garage-android/releases/latest/download/HesabYar-Garage-latest.apk
 ```
 
-## Manual publication of the provided 1.0.0 APK
+## Manual publication of the provided 1.0.1 APK
 
-The already-built APK remains available locally at `release/HesabYar-Garage-v1.0.0.apk` and is intentionally ignored by Git. If you publish this exact file manually, upload it twice—once with its versioned name and once as `HesabYar-Garage-latest.apk`—along with `release/SHA256.txt` and `release/RELEASE_NOTES_v1.0.0.md`.
+The already-built APK remains available locally at `release/HesabYar-Garage-v1.0.1.apk` and is intentionally ignored by Git. If you publish this exact file manually, upload it twice—once with its versioned name and once as `HesabYar-Garage-latest.apk`—along with `release/SHA256.txt` and `release/RELEASE_NOTES_v1.0.1.md`.
 
-From PowerShell, after pushing the `v1.0.0` tag:
+From PowerShell, after pushing the `v1.0.1` tag:
 
 ```powershell
-Copy-Item release/HesabYar-Garage-v1.0.0.apk release/HesabYar-Garage-latest.apk -Force
+Copy-Item release/HesabYar-Garage-v1.0.1.apk release/HesabYar-Garage-latest.apk -Force
 
-gh release create v1.0.0 `
-  "release/HesabYar-Garage-v1.0.0.apk#HesabYar Garage 1.0.0" `
+gh release create v1.0.1 `
+  "release/HesabYar-Garage-v1.0.1.apk#HesabYar Garage 1.0.1" `
   "release/HesabYar-Garage-latest.apk#Latest HesabYar Garage APK" `
   "release/SHA256.txt#SHA-256 checksum" `
   --verify-tag `
-  --title "HesabYar Garage 1.0.0" `
-  --notes-file release/RELEASE_NOTES_v1.0.0.md
+  --title "HesabYar Garage 1.0.1" `
+  --notes-file release/RELEASE_NOTES_v1.0.1.md
 ```
 
 The same signing key must be used for all updates installed over that APK. For a long-lived public project, configure the permanent release key and automated workflow before the first public release.

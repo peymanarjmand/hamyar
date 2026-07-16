@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-07-16
+
+### Fixed
+
+- Prevented the personnel detail screen from crashing when records from separate sections shared the same database ID.
+- Clamped the selected day automatically when changing to a shorter Solar Hijri month or a non-leap Esfand.
+
+### Changed
+
+- Replaced the date stepper with faster month/day dropdowns and direct numeric input.
+- Accepted Persian, Arabic, and Latin digits while validating Solar Hijri year, month, and day values.
+
 ## [1.0.0] - 2026-07-16
 
 ### Added
@@ -20,5 +32,6 @@ All notable changes to this project are documented in this file. The format foll
 - Final Solar Hijri year closing with historical year access and remainder rollover.
 - Unit, instrumentation, lint, release-install, and integrity verification coverage.
 
-[Unreleased]: ../../compare/v1.0.0...HEAD
+[Unreleased]: ../../compare/v1.0.1...HEAD
+[1.0.1]: ../../compare/v1.0.0...v1.0.1
 [1.0.0]: ../../releases/tag/v1.0.0

@@ -30,7 +30,7 @@ This is deliberately more than a CRUD application. It separates **what each empl
 
 | Area | What the application handles |
 | --- | --- |
-| Workforce | Personnel profiles, phone numbers, roles, multiple employment periods, temporary absences, and inclusive start/end dates |
+| Workforce | Personnel profiles, phone numbers, roles, multiple employment periods, temporary absences, and fast validated Solar Hijri date entry |
 | Eligibility | Equal sharing with an immutable decision snapshot for every employee at every income event |
 | Income | Customer tips and scrap-sale proceeds, received as cash or into a selected bank card |
 | Custody | Partial or full money transfers between people and cash/card accounts with FIFO source allocation |
@@ -98,12 +98,12 @@ Core technologies:
 
 ## Quality evidence
 
-- 19 JVM tests across eligibility boundaries, accounting invariants, Jalali conversion, card validation, backup cryptography, and backup schema contracts
-- 2 Android instrumentation tests using a real in-memory Room database and Android Keystore
+- 23 JVM tests across eligibility boundaries, accounting invariants, personnel-list key safety, Jalali input/conversion, card validation, backup cryptography, and backup schema contracts
+- 4 Android instrumentation tests covering a real Room/Keystore stack plus month/day dropdowns and multilingual numeric date input
 - Password-encrypted backup → database wipe → full restore tested on Android 15
 - Partial custody transfer and balanced claim/custody totals tested on Android 15
 - `lintDebug` passes without errors
-- Minified Release APK verified, installed, and cold-started on Android 15
+- Minified Release APK verified and updated in place from 1.0.0 to 1.0.1 on Android 15 without losing seeded personnel data
 - Universal APK contains `arm64-v8a`, `armeabi-v7a`, `x86`, and `x86_64`
 
 See the full [test report](docs/TEST_REPORT.md) and [delivery audit](docs/COMPLETION_AUDIT.md).
