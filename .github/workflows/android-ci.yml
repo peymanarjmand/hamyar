@@ -50,7 +50,9 @@ jobs:
         run: |
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
           test -n "$AAPT" || { echo "Unable to locate aapt" >&2; exit 1; }
-          "$AAPT" dump permissions app/build/outputs/apk/release/app-release.apk |
+          RELEASE_APK="app/build/outputs/apk/release/app-release-unsigned.apk"
+          test -f "$RELEASE_APK" || { echo "Unsigned release APK not found" >&2; exit 1; }
+          "$AAPT" dump permissions "$RELEASE_APK" |
             bash scripts/verify-apk-permissions.sh com.hesabyar.garage
 
       - name: Upload verification reports
