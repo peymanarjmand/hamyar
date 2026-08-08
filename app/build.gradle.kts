@@ -26,8 +26,8 @@ android {
         applicationId = "com.hesabyar.garage"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 7
+        versionName = "1.4.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -52,9 +52,14 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            // Local release builds remain installable; public releases inject a
-            // stable private signing key through environment variables.
-            signingConfig = signingConfigs.getByName(if (hasReleaseSigning) "release" else "debug")
+            // Do not embed source-control identity in public packages. The
+            // exact signed candidate is frozen and published without rebuilding.
+            vcsInfo {
+                include = false
+            }
+            // A release without the permanent key stays unsigned. Public
+            // artifacts must be built through assemblePublicRelease.
+            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -79,6 +84,7 @@ android {
     )
 
     testOptions.unitTests.isIncludeAndroidResources = true
+    sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
 }
 
 kotlin {
@@ -93,12 +99,13 @@ ksp {
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.06.01")
 
-    implementation("androidx.core:core-ktx:1.19.0")
+    implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-compose:1.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.4")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")
     implementation("androidx.navigation:navigation-compose:2.9.3")
+    implementation("androidx.biometric:biometric:1.1.0")
 
     implementation(composeBom)
     androidTestImplementation(composeBom)
@@ -122,4 +129,24 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+}
+
+val verifyReleaseSigningConfigured by tasks.registering {
+    group = "verification"
+    description = "Fails unless every permanent release-signing environment variable is configured."
+    doLast {
+        check(hasReleaseSigning) {
+            "Public release signing is not configured. Set all HESABYAR_KEYSTORE_* environment variables."
+        }
+    }
+}
+
+tasks.register("assemblePublicRelease") {
+    group = "build"
+    description = "Builds a release that is guaranteed to use the configured permanent signing key."
+    dependsOn(verifyReleaseSigningConfigured, "assembleRelease")
+}
+
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    mustRunAfter(verifyReleaseSigningConfigured)
 }

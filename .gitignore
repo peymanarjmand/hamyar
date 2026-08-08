@@ -19,13 +19,16 @@ local.properties
 *.jks
 *.keystore
 keystore.properties
+/.release-signing/
 
 # Release binaries belong in GitHub Releases, not Git history
-release/*.apk
-release/*.aab
+release/**/*.apk
+release/**/*.aab
 
 # OS and tooling noise
 .DS_Store
 Thumbs.db
 *.log
 *.hprof
+# Added by code-review-graph
+.code-review-graph/

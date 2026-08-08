@@ -20,26 +20,42 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5.6.0
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6
 
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
 
+      - name: Verify release gates
+        run: |
+          bash -n scripts/verify-play-protect-approval.sh
+          bash -n scripts/test-verify-play-protect-approval.sh
+          bash -n scripts/verify-apk-permissions.sh
+          bash -n scripts/test-verify-apk-permissions.sh
+          bash scripts/test-verify-play-protect-approval.sh
+          bash scripts/test-verify-apk-permissions.sh
+
       - name: Verify project
         run: ./gradlew testDebugUnitTest lintDebug assembleDebugAndroidTest assembleRelease --stacktrace
 
+      - name: Verify release APK permission allowlist
+        run: |
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          test -n "$AAPT" || { echo "Unable to locate aapt" >&2; exit 1; }
+          "$AAPT" dump permissions app/build/outputs/apk/release/app-release.apk |
+            bash scripts/verify-apk-permissions.sh com.hesabyar.garage
+
       - name: Upload verification reports
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: android-verification-reports
           path: |

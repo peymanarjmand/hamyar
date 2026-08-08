@@ -20,11 +20,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hesabyar.garage.data.local.FinancialYearEntity
 import com.hesabyar.garage.domain.FinancialYearStatus
+import com.hesabyar.garage.domain.MoneyMethod
 import com.hesabyar.garage.domain.PersonBalance
 import com.hesabyar.garage.ui.theme.Danger
 import com.hesabyar.garage.ui.theme.Success
 import com.hesabyar.garage.util.PersianDate
 import com.hesabyar.garage.util.PersianDateInput
+import com.hesabyar.garage.util.IranianCardValidator
+import com.hesabyar.garage.util.MovementTimeInput
 import com.hesabyar.garage.util.formatMoney
 import com.hesabyar.garage.util.toLatinDigits
 import com.hesabyar.garage.util.toPersianDigits
@@ -303,6 +306,102 @@ fun MoneyField(value: String, onValueChange: (String) -> Unit, modifier: Modifie
 }
 
 @Composable
+fun MovementDetailsFields(
+    method: MoneyMethod,
+    onMethodChange: (MoneyMethod) -> Unit,
+    cardNumber: String,
+    onCardNumberChange: (String) -> Unit,
+    movementDate: PersianDate?,
+    onMovementDateChange: (PersianDate?) -> Unit,
+    movementTime: String,
+    onMovementTimeChange: (String) -> Unit,
+    allowedMethods: Set<MoneyMethod> = setOf(MoneyMethod.CASH, MoneyMethod.CARD),
+) {
+    Text("روش جابه‌جایی پول*", fontWeight = FontWeight.Bold)
+    val methods = listOf(MoneyMethod.CASH, MoneyMethod.CARD, MoneyMethod.POS).filter { it in allowedMethods }
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        methods.forEachIndexed { index, item ->
+            SegmentedButton(
+                selected = method == item,
+                onClick = {
+                    onMethodChange(item)
+                    if (item != MoneyMethod.CARD) onCardNumberChange("")
+                },
+                shape = SegmentedButtonDefaults.itemShape(index, methods.size),
+            ) {
+                Text(
+                    when (item) {
+                        MoneyMethod.CASH -> "نقدی"
+                        MoneyMethod.CARD -> "کارت‌به‌کارت"
+                        MoneyMethod.POS -> "پوز"
+                    },
+                )
+            }
+        }
+    }
+    if (method == MoneyMethod.CARD) {
+        val normalized = IranianCardValidator.normalize(cardNumber)
+        OutlinedTextField(
+            value = IranianCardValidator.formatFull(cardNumber),
+            onValueChange = { onCardNumberChange(IranianCardValidator.normalize(it).take(16)) },
+            label = { Text("شماره کارت — اختیاری") },
+            isError = normalized.isNotBlank() && normalized.length == 16 && !IranianCardValidator.isValid(normalized),
+            supportingText = {
+                Text(
+                    when {
+                        normalized.isBlank() -> "می‌توانید کارت‌به‌کارت را بدون شماره کارت ثبت کنید."
+                        normalized.length < 16 -> "شماره را کامل کنید یا برای ثبت اختیاری، فیلد را خالی بگذارید."
+                        IranianCardValidator.isValid(normalized) -> "شماره در این تراکنش به‌صورت رمزنگاری‌شده ذخیره می‌شود."
+                        else -> "شماره کارت معتبر نیست."
+                    },
+                )
+            },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+        )
+    }
+    if (method == MoneyMethod.POS) {
+        Text(
+            "شماره کارت مشتری ذخیره نمی‌شود؛ شماره پیگیری رسید را در صورت نیاز در توضیحات بنویسید.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Switch(
+            checked = movementDate != null,
+            onCheckedChange = { enabled ->
+                onMovementDateChange(if (enabled) PersianDate.today() else null)
+                if (!enabled) onMovementTimeChange("")
+            },
+        )
+        Spacer(Modifier.width(8.dp))
+        Column {
+            Text("ثبت تاریخ و زمان دقیق — اختیاری")
+            Text("برای رسید یا پیگیری بانکی؛ مستقل از تاریخ حسابداری", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+    movementDate?.let { date ->
+        PersianDateField("تاریخ دقیق تراکنش — اختیاری", date, { onMovementDateChange(it) })
+        OutlinedTextField(
+            value = MovementTimeInput.displayInput(movementTime),
+            onValueChange = { onMovementTimeChange(MovementTimeInput.digits(it)) },
+            label = { Text("ساعت — اختیاری (مثلاً ۱۴:۳۰)") },
+            isError = !MovementTimeInput.isValidOrBlank(movementTime),
+            supportingText = {
+                if (!MovementTimeInput.isValidOrBlank(movementTime)) Text("ساعت باید بین ۰۰:۰۰ تا ۲۳:۵۹ باشد.")
+            },
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+        )
+    }
+}
+
+@Composable
 fun PrimaryButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     Button(
         onClick = onClick,
@@ -326,9 +425,62 @@ fun BalanceLabel(balance: PersonBalance, compact: Boolean = false) {
     val color: Color
     val text: String
     when {
+        balance.isFullySettled -> { color = MaterialTheme.colorScheme.secondary; text = "حساب این سال تسویه است" }
+        balance.claim == balance.custody && balance.claim > 0 -> {
+            color = MaterialTheme.colorScheme.primary
+            text = "باید ${formatMoney(balance.claim)} از پول نزد خودش به‌عنوان سهم ثبت شود"
+        }
         balance.net > 0 -> { color = Success; text = "باید ${formatMoney(balance.net)} دریافت کند" }
-        balance.net < 0 -> { color = Danger; text = "باید ${formatMoney(-balance.net)} بپردازد" }
-        else -> { color = MaterialTheme.colorScheme.secondary; text = "حساب تسویه است" }
+        balance.net < 0 -> { color = Danger; text = "باید ${formatMoney(-balance.net)} به دیگران پرداخت کند" }
+        else -> { color = MaterialTheme.colorScheme.primary; text = "برداشت سهم از پول نزد خودش باید ثبت شود" }
     }
     Text(text, color = color, fontWeight = FontWeight.Bold, fontSize = if (compact) 13.sp else 15.sp)
+}
+
+@Composable
+fun PersonFinancialSummary(balance: PersonBalance, year: Int, compact: Boolean = false) {
+    Column(verticalArrangement = Arrangement.spacedBy(if (compact) 7.dp else 10.dp)) {
+        Text(
+            "وضعیت سال ${year.toString().toPersianDigits()}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Surface(
+            color = MaterialTheme.colorScheme.primaryContainer,
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Column(Modifier.fillMaxWidth().padding(if (compact) 10.dp else 12.dp)) {
+                BalanceLabel(balance, compact)
+                if (balance.selfOffsetNeeded > 0 && balance.claim != balance.custody) {
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        "برداشت سهم از پول نزد خودش: ${formatMoney(balance.selfOffsetNeeded)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FinancialSummaryValue("کل سهم تا امروز", balance.totalEntitlement, Modifier.weight(1f), compact)
+            FinancialSummaryValue("از سهمش تسویه شده", balance.settledEntitlement, Modifier.weight(1f), compact)
+        }
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("پول مشترک فعلاً نزد او", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                Text(formatMoney(balance.custody), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FinancialSummaryValue(label: String, amount: Long, modifier: Modifier, compact: Boolean) {
+    Column(modifier) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(formatMoney(amount), fontWeight = FontWeight.Bold, fontSize = if (compact) 13.sp else 15.sp)
+    }
 }

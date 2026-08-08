@@ -4,6 +4,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import androidx.room.ColumnInfo
 import com.hesabyar.garage.domain.*
 
 @Entity(tableName = "employees")
@@ -15,6 +16,7 @@ data class EmployeeEntity(
     val notes: String = "",
     val createdAt: Long = System.currentTimeMillis(),
     val archivedAt: Long? = null,
+    @ColumnInfo(defaultValue = "1") val sharedIncomeEligible: Boolean = true,
 )
 
 @Entity(
@@ -81,7 +83,13 @@ data class FinancialYearEntity(
         ForeignKey(entity = EmployeeEntity::class, parentColumns = ["id"], childColumns = ["receiverEmployeeId"], onDelete = ForeignKey.RESTRICT),
         ForeignKey(entity = MoneyAccountEntity::class, parentColumns = ["id"], childColumns = ["receiverAccountId"], onDelete = ForeignKey.RESTRICT),
     ],
-    indices = [Index("financialYear"), Index("receiverEmployeeId"), Index("receiverAccountId"), Index(value = ["commandId"], unique = true)],
+    indices = [
+        Index("financialYear"),
+        Index("receiverEmployeeId"),
+        Index("receiverAccountId"),
+        Index(value = ["commandId"], unique = true),
+        Index(value = ["replacesEventId"], unique = true),
+    ],
 )
 data class IncomeEventEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -101,6 +109,10 @@ data class IncomeEventEntity(
     val createdAt: Long = System.currentTimeMillis(),
     val reversedAt: Long? = null,
     val replacesEventId: Long? = null,
+    @ColumnInfo(defaultValue = "''") val cardNumberEncrypted: String = "",
+    @ColumnInfo(defaultValue = "''") val cardLast4: String = "",
+    val movementDateEpochDay: Long? = null,
+    val movementTimeMinutes: Int? = null,
 )
 
 @Entity(
@@ -175,7 +187,15 @@ data class CustodyPostingEntity(
         ForeignKey(entity = MoneyAccountEntity::class, parentColumns = ["id"], childColumns = ["fromAccountId"], onDelete = ForeignKey.RESTRICT),
         ForeignKey(entity = MoneyAccountEntity::class, parentColumns = ["id"], childColumns = ["toAccountId"], onDelete = ForeignKey.RESTRICT),
     ],
-    indices = [Index("financialYear"), Index("fromEmployeeId"), Index("toEmployeeId"), Index("fromAccountId"), Index("toAccountId"), Index(value = ["commandId"], unique = true)],
+    indices = [
+        Index("financialYear"),
+        Index("fromEmployeeId"),
+        Index("toEmployeeId"),
+        Index("fromAccountId"),
+        Index("toAccountId"),
+        Index(value = ["commandId"], unique = true),
+        Index(value = ["replacesTransferId"], unique = true),
+    ],
 )
 data class CustodyTransferEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -192,6 +212,11 @@ data class CustodyTransferEntity(
     val status: RecordStatus = RecordStatus.POSTED,
     val createdAt: Long = System.currentTimeMillis(),
     val reversedAt: Long? = null,
+    @ColumnInfo(defaultValue = "''") val cardNumberEncrypted: String = "",
+    @ColumnInfo(defaultValue = "''") val cardLast4: String = "",
+    val movementDateEpochDay: Long? = null,
+    val movementTimeMinutes: Int? = null,
+    val replacesTransferId: Long? = null,
 )
 
 @Entity(
@@ -217,7 +242,15 @@ data class CustodyTransferAllocationEntity(
         ForeignKey(entity = MoneyAccountEntity::class, parentColumns = ["id"], childColumns = ["fromAccountId"], onDelete = ForeignKey.RESTRICT),
         ForeignKey(entity = MoneyAccountEntity::class, parentColumns = ["id"], childColumns = ["destinationAccountId"], onDelete = ForeignKey.RESTRICT),
     ],
-    indices = [Index("financialYear"), Index("fromEmployeeId"), Index("toEmployeeId"), Index("fromAccountId"), Index("destinationAccountId"), Index(value = ["commandId"], unique = true)],
+    indices = [
+        Index("financialYear"),
+        Index("fromEmployeeId"),
+        Index("toEmployeeId"),
+        Index("fromAccountId"),
+        Index("destinationAccountId"),
+        Index(value = ["commandId"], unique = true),
+        Index(value = ["replacesPaymentId"], unique = true),
+    ],
 )
 data class SettlementPaymentEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -235,6 +268,11 @@ data class SettlementPaymentEntity(
     val status: RecordStatus = RecordStatus.POSTED,
     val createdAt: Long = System.currentTimeMillis(),
     val reversedAt: Long? = null,
+    @ColumnInfo(defaultValue = "''") val cardNumberEncrypted: String = "",
+    @ColumnInfo(defaultValue = "''") val cardLast4: String = "",
+    val movementDateEpochDay: Long? = null,
+    val movementTimeMinutes: Int? = null,
+    val replacesPaymentId: Long? = null,
 )
 
 @Entity(

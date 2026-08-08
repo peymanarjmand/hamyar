@@ -12,6 +12,8 @@ data class PersonBalanceRow(
     val employeeName: String,
     val claimAmount: Long,
     val custodyAmount: Long,
+    val totalEntitlementAmount: Long,
+    val settledEntitlementAmount: Long,
 )
 
 data class AccountCustodyRow(
@@ -40,6 +42,7 @@ data class IncomeWithReceiverRow(
     val amount: Long,
     val type: String,
     val receiverName: String,
+    val method: String,
     val description: String,
     val sharePerPerson: Long,
     val resultingRemainder: Long,
@@ -64,6 +67,7 @@ interface GarageDao {
     @Query("SELECT * FROM employees WHERE archivedAt IS NULL ORDER BY name") fun observeEmployees(): Flow<List<EmployeeEntity>>
     @Query("SELECT * FROM employees ORDER BY name") suspend fun allEmployees(): List<EmployeeEntity>
     @Query("SELECT * FROM employees WHERE id=:id") suspend fun employee(id: Long): EmployeeEntity?
+    @Query("SELECT * FROM employees WHERE id=:id") fun observeEmployee(id: Long): Flow<EmployeeEntity?>
     @Query("""
         SELECT COUNT(DISTINCT e.id) FROM employees e
         JOIN employment_periods p ON p.employeeId=e.id AND p.voidedAt IS NULL
@@ -74,6 +78,7 @@ interface GarageDao {
     @Update suspend fun updateEmploymentPeriod(entity: EmploymentPeriodEntity)
     @Query("SELECT * FROM employment_periods WHERE employeeId=:employeeId AND voidedAt IS NULL ORDER BY startEpochDay") fun observeEmploymentPeriods(employeeId: Long): Flow<List<EmploymentPeriodEntity>>
     @Query("SELECT * FROM employment_periods WHERE employeeId=:employeeId AND voidedAt IS NULL ORDER BY startEpochDay") suspend fun employmentPeriods(employeeId: Long): List<EmploymentPeriodEntity>
+    @Query("SELECT * FROM employment_periods WHERE id=:id AND voidedAt IS NULL") suspend fun employmentPeriod(id: Long): EmploymentPeriodEntity?
     @Query("SELECT * FROM employment_periods WHERE employeeId=:employeeId AND voidedAt IS NULL AND endEpochDay IS NULL ORDER BY startEpochDay DESC LIMIT 1") suspend fun openEmploymentPeriod(employeeId: Long): EmploymentPeriodEntity?
     @Query("SELECT * FROM employment_periods ORDER BY startEpochDay") suspend fun allEmploymentPeriods(): List<EmploymentPeriodEntity>
 
@@ -81,6 +86,7 @@ interface GarageDao {
     @Update suspend fun updateAbsence(entity: AbsencePeriodEntity)
     @Query("SELECT * FROM absence_periods WHERE employeeId=:employeeId AND voidedAt IS NULL ORDER BY startEpochDay") fun observeAbsences(employeeId: Long): Flow<List<AbsencePeriodEntity>>
     @Query("SELECT * FROM absence_periods WHERE employeeId=:employeeId AND voidedAt IS NULL ORDER BY startEpochDay") suspend fun absences(employeeId: Long): List<AbsencePeriodEntity>
+    @Query("SELECT * FROM absence_periods WHERE id=:id AND voidedAt IS NULL") suspend fun absence(id: Long): AbsencePeriodEntity?
     @Query("SELECT * FROM absence_periods ORDER BY startEpochDay") suspend fun allAbsences(): List<AbsencePeriodEntity>
 
     @Insert suspend fun insertAccount(entity: MoneyAccountEntity): Long
@@ -102,19 +108,40 @@ interface GarageDao {
     @Query("SELECT * FROM income_events WHERE id=:id") suspend fun incomeEvent(id: Long): IncomeEventEntity?
     @Query("SELECT * FROM income_events WHERE commandId=:commandId LIMIT 1") suspend fun incomeByCommand(commandId: String): IncomeEventEntity?
     @Query("SELECT * FROM income_events ORDER BY dateEpochDay, id") suspend fun allIncomeEvents(): List<IncomeEventEntity>
+    @Query("SELECT * FROM income_events WHERE financialYear=:year ORDER BY id") suspend fun incomeEventsForYear(year: Int): List<IncomeEventEntity>
     @Query("SELECT * FROM income_events WHERE financialYear=:year AND status='POSTED' ORDER BY dateEpochDay DESC, id DESC") fun observeIncomeEvents(year: Int): Flow<List<IncomeEventEntity>>
     @Query("""
         SELECT i.id, i.financialYear, i.dateEpochDay, i.amount, i.type, e.name AS receiverName,
-               i.description, i.sharePerPerson, i.resultingRemainder, i.status
+               i.method, i.description, i.sharePerPerson, i.resultingRemainder, i.status
         FROM income_events i JOIN employees e ON e.id=i.receiverEmployeeId
-        WHERE i.financialYear=:year
+        WHERE i.financialYear=:year AND i.status='POSTED'
         ORDER BY i.dateEpochDay DESC, i.id DESC
     """) fun observeIncomeRows(year: Int): Flow<List<IncomeWithReceiverRow>>
+    @Query("""
+        SELECT i.id, i.financialYear, i.dateEpochDay, i.amount, i.type, e.name AS receiverName,
+               i.method, i.description, i.sharePerPerson, i.resultingRemainder, i.status
+        FROM income_events i JOIN employees e ON e.id=i.receiverEmployeeId
+        WHERE i.financialYear=:year AND i.status IN ('POSTED','DELETED')
+        ORDER BY i.dateEpochDay DESC, i.id DESC
+    """) fun observeIncomeHistoryRows(year: Int): Flow<List<IncomeWithReceiverRow>>
     @Query("SELECT COALESCE(SUM(amount),0) FROM income_events WHERE financialYear=:year AND status='POSTED'") fun observeTotalIncome(year: Int): Flow<Long>
     @Query("SELECT COALESCE(SUM(amount),0) FROM income_events WHERE financialYear=:year AND type=:type AND status='POSTED'") suspend fun totalIncomeByType(year: Int, type: String): Long
+    @Query("""
+        SELECT
+          (SELECT COUNT(*) FROM custody_transfer_allocations a
+             JOIN custody_transfers t ON t.id=a.transferId
+             WHERE a.sourceIncomeEventId=:eventId AND t.status='POSTED') +
+          (SELECT COUNT(*) FROM settlement_custody_allocations a
+             JOIN settlement_payments p ON p.id=a.paymentId
+             WHERE a.sourceIncomeEventId=:eventId AND p.status='POSTED') +
+          (SELECT COUNT(*) FROM settlement_claim_allocations a
+             JOIN settlement_payments p ON p.id=a.paymentId
+             WHERE a.sourceIncomeEventId=:eventId AND p.status='POSTED')
+    """) suspend fun activeAllocationCountForIncome(eventId: Long): Int
 
     @Insert suspend fun insertEligibilitySnapshots(entities: List<EligibilitySnapshotEntity>)
     @Query("SELECT * FROM eligibility_snapshots WHERE eventId=:eventId ORDER BY status DESC, employeeId") fun observeEligibilitySnapshots(eventId: Long): Flow<List<EligibilitySnapshotEntity>>
+    @Query("SELECT * FROM eligibility_snapshots WHERE eventId=:eventId ORDER BY employeeId") suspend fun eligibilitySnapshots(eventId: Long): List<EligibilitySnapshotEntity>
     @Query("SELECT * FROM eligibility_snapshots ORDER BY eventId, employeeId") suspend fun allEligibilitySnapshots(): List<EligibilitySnapshotEntity>
 
     @Insert suspend fun insertClaimPostings(entities: List<ClaimPostingEntity>)
@@ -127,15 +154,39 @@ interface GarageDao {
     @Query("SELECT COALESCE(SUM(amountSigned),0) FROM custody_postings WHERE financialYear=:year AND employeeId=:employeeId") suspend fun custodyBalance(year: Int, employeeId: Long): Long
     @Query("SELECT COALESCE(SUM(amountSigned),0) FROM custody_postings WHERE financialYear=:year AND accountId=:accountId") suspend fun accountCustody(year: Int, accountId: Long): Long
     @Query("""
+        SELECT COUNT(*) FROM (
+            SELECT accountId FROM custody_postings WHERE financialYear=:year
+            GROUP BY accountId HAVING SUM(amountSigned) < 0
+        )
+    """) suspend fun negativeAccountBalanceCount(year: Int): Int
+    @Query("""
+        SELECT COUNT(*) FROM (
+            SELECT sourceIncomeEventId, accountId FROM custody_postings
+            WHERE financialYear=:year AND sourceIncomeEventId IS NOT NULL
+            GROUP BY sourceIncomeEventId, accountId HAVING SUM(amountSigned) < 0
+        )
+    """) suspend fun negativeCustodySourceCount(year: Int): Int
+    @Query("""
+        SELECT COUNT(*) FROM (
+            SELECT sourceIncomeEventId, employeeId FROM claim_postings
+            WHERE financialYear=:year AND sourceIncomeEventId IS NOT NULL AND employeeId IS NOT NULL
+            GROUP BY sourceIncomeEventId, employeeId HAVING SUM(amountSigned) < 0
+        )
+    """) suspend fun negativeClaimSourceCount(year: Int): Int
+    @Query("""
         SELECT e.id AS employeeId, e.name AS employeeName,
           COALESCE((SELECT SUM(c.amountSigned) FROM claim_postings c WHERE c.financialYear=:year AND c.employeeId=e.id),0) AS claimAmount,
-          COALESCE((SELECT SUM(p.amountSigned) FROM custody_postings p WHERE p.financialYear=:year AND p.employeeId=e.id),0) AS custodyAmount
+          COALESCE((SELECT SUM(p.amountSigned) FROM custody_postings p WHERE p.financialYear=:year AND p.employeeId=e.id),0) AS custodyAmount,
+          COALESCE((SELECT SUM(c.amountSigned) FROM claim_postings c WHERE c.financialYear=:year AND c.employeeId=e.id AND c.type='ENTITLEMENT'),0) AS totalEntitlementAmount,
+          COALESCE((SELECT -SUM(c.amountSigned) FROM claim_postings c WHERE c.financialYear=:year AND c.employeeId=e.id AND c.type IN ('SETTLEMENT_RECEIVED','SELF_OFFSET')),0) AS settledEntitlementAmount
         FROM employees e ORDER BY e.name
     """) fun observePersonBalances(year: Int): Flow<List<PersonBalanceRow>>
     @Query("""
         SELECT e.id AS employeeId, e.name AS employeeName,
           COALESCE((SELECT SUM(c.amountSigned) FROM claim_postings c WHERE c.financialYear=:year AND c.employeeId=e.id),0) AS claimAmount,
-          COALESCE((SELECT SUM(p.amountSigned) FROM custody_postings p WHERE p.financialYear=:year AND p.employeeId=e.id),0) AS custodyAmount
+          COALESCE((SELECT SUM(p.amountSigned) FROM custody_postings p WHERE p.financialYear=:year AND p.employeeId=e.id),0) AS custodyAmount,
+          COALESCE((SELECT SUM(c.amountSigned) FROM claim_postings c WHERE c.financialYear=:year AND c.employeeId=e.id AND c.type='ENTITLEMENT'),0) AS totalEntitlementAmount,
+          COALESCE((SELECT -SUM(c.amountSigned) FROM claim_postings c WHERE c.financialYear=:year AND c.employeeId=e.id AND c.type IN ('SETTLEMENT_RECEIVED','SELF_OFFSET')),0) AS settledEntitlementAmount
         FROM employees e ORDER BY e.name
     """) suspend fun personBalances(year: Int): List<PersonBalanceRow>
     @Query("""
@@ -153,6 +204,22 @@ interface GarageDao {
     """) suspend fun accountCustodyRows(year: Int): List<AccountCustodyRow>
     @Query("SELECT * FROM claim_postings WHERE financialYear=:year ORDER BY id") suspend fun claimPostingsForYear(year: Int): List<ClaimPostingEntity>
     @Query("SELECT * FROM custody_postings WHERE financialYear=:year ORDER BY id") suspend fun custodyPostingsForYear(year: Int): List<CustodyPostingEntity>
+    @Query("""
+        SELECT * FROM claim_postings
+        WHERE financialYear=:year AND referenceId=:eventId AND sourceIncomeEventId=:eventId
+          AND type IN ('ENTITLEMENT','REMAINDER_ADD','REMAINDER_RELEASE')
+        ORDER BY id
+    """) suspend fun incomeClaimPostings(year: Int, eventId: Long): List<ClaimPostingEntity>
+    @Query("""
+        SELECT * FROM custody_postings
+        WHERE financialYear=:year AND referenceId=:eventId AND sourceIncomeEventId=:eventId
+          AND type='INCOME_RECEIPT'
+        ORDER BY id
+    """) suspend fun incomeCustodyPostings(year: Int, eventId: Long): List<CustodyPostingEntity>
+    @Query("""
+        SELECT COALESCE(SUM(amountSigned),0) FROM custody_postings
+        WHERE financialYear=:year AND accountId=:accountId AND sourceIncomeEventId=:sourceIncomeEventId
+    """) suspend fun custodySourceBalance(year: Int, accountId: Long, sourceIncomeEventId: Long): Long
     @Query("""
         SELECT p.sourceIncomeEventId AS sourceIncomeEventId, SUM(p.amountSigned) AS amount,
                MIN(i.dateEpochDay) AS sourceDate
@@ -175,6 +242,7 @@ interface GarageDao {
     @Query("SELECT * FROM custody_transfers WHERE id=:id") suspend fun custodyTransfer(id: Long): CustodyTransferEntity?
     @Query("SELECT * FROM custody_transfer_allocations WHERE transferId=:id ORDER BY sourceIncomeEventId") suspend fun custodyTransferAllocations(id: Long): List<CustodyTransferAllocationEntity>
     @Query("SELECT * FROM custody_transfers WHERE financialYear=:year AND status='POSTED' ORDER BY dateEpochDay DESC, id DESC") fun observeCustodyTransfers(year: Int): Flow<List<CustodyTransferEntity>>
+    @Query("SELECT * FROM custody_transfers WHERE financialYear=:year AND status IN ('POSTED','DELETED') ORDER BY dateEpochDay DESC, id DESC") fun observeCustodyTransferHistory(year: Int): Flow<List<CustodyTransferEntity>>
     @Query("SELECT * FROM custody_transfers ORDER BY id") suspend fun allCustodyTransfers(): List<CustodyTransferEntity>
     @Query("SELECT * FROM custody_transfer_allocations ORDER BY transferId, sourceIncomeEventId") suspend fun allCustodyTransferAllocations(): List<CustodyTransferAllocationEntity>
 
@@ -187,6 +255,7 @@ interface GarageDao {
     @Query("SELECT * FROM settlement_claim_allocations WHERE paymentId=:id ORDER BY sourceIncomeEventId") suspend fun settlementClaimAllocations(id: Long): List<SettlementClaimAllocationEntity>
     @Query("SELECT * FROM settlement_custody_allocations WHERE paymentId=:id ORDER BY sourceIncomeEventId") suspend fun settlementCustodyAllocations(id: Long): List<SettlementCustodyAllocationEntity>
     @Query("SELECT * FROM settlement_payments WHERE financialYear=:year AND status='POSTED' ORDER BY dateEpochDay DESC, id DESC") fun observeSettlements(year: Int): Flow<List<SettlementPaymentEntity>>
+    @Query("SELECT * FROM settlement_payments WHERE financialYear=:year AND status IN ('POSTED','DELETED') ORDER BY dateEpochDay DESC, id DESC") fun observeSettlementHistory(year: Int): Flow<List<SettlementPaymentEntity>>
     @Query("SELECT * FROM settlement_payments ORDER BY id") suspend fun allSettlementPayments(): List<SettlementPaymentEntity>
     @Query("SELECT * FROM settlement_claim_allocations ORDER BY paymentId, sourceIncomeEventId") suspend fun allSettlementClaimAllocations(): List<SettlementClaimAllocationEntity>
     @Query("SELECT * FROM settlement_custody_allocations ORDER BY paymentId, sourceIncomeEventId") suspend fun allSettlementCustodyAllocations(): List<SettlementCustodyAllocationEntity>
@@ -199,6 +268,10 @@ interface GarageDao {
     @Query("SELECT * FROM annual_close_employee_snapshots ORDER BY closeId, employeeId") suspend fun allAnnualCloseSnapshots(): List<AnnualCloseEmployeeSnapshotEntity>
 
     @Insert suspend fun insertAudit(entity: AuditLogEntity): Long
+    @Query("SELECT * FROM audit_logs WHERE action='CORRECT' AND entityType=:entityType AND entityId=:entityId ORDER BY id DESC LIMIT 1")
+    suspend fun correctionAudit(entityType: String, entityId: Long): AuditLogEntity?
+    @Query("SELECT * FROM audit_logs WHERE action='DELETE' AND entityType=:entityType AND entityId=:entityId ORDER BY id DESC LIMIT 1")
+    suspend fun deletionAudit(entityType: String, entityId: Long): AuditLogEntity?
     @Query("SELECT * FROM audit_logs WHERE financialYear=:year OR :year IS NULL ORDER BY createdAt DESC, id DESC") fun observeAudit(year: Int?): Flow<List<AuditLogEntity>>
     @Query("SELECT * FROM audit_logs ORDER BY id") suspend fun allAuditLogs(): List<AuditLogEntity>
     @Query("SELECT COALESCE(MAX(createdAt),0) FROM audit_logs WHERE financialYear=:year") suspend fun latestAuditAt(year: Int): Long
