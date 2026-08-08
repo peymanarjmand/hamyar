@@ -35,6 +35,12 @@ class BackupReflectionContractTest {
         }
     }
 
+    @Test fun `financial revision links remain in the explicit backup constructor order`() {
+        assertEquals("replacesEventId", backupFieldNames(IncomeEventEntity::class.java)[16])
+        assertEquals("replacesTransferId", backupFieldNames(CustodyTransferEntity::class.java).last())
+        assertEquals("replacesPaymentId", backupFieldNames(SettlementPaymentEntity::class.java).last())
+    }
+
     private fun boxed(type: Class<*>): Class<*> = when (type) {
         java.lang.Long.TYPE -> java.lang.Long::class.java
         java.lang.Integer.TYPE -> java.lang.Integer::class.java

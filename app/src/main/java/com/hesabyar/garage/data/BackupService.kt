@@ -3,6 +3,7 @@ package com.hesabyar.garage.data
 import android.content.Context
 import androidx.room.withTransaction
 import com.hesabyar.garage.data.local.*
+import com.hesabyar.garage.domain.EligibilityEngine
 import com.hesabyar.garage.security.BackupCrypto
 import com.hesabyar.garage.security.CardCrypto
 import kotlinx.coroutines.Dispatchers
@@ -41,7 +42,7 @@ class BackupService(
         val checksum = BackupCrypto.checksum(payloadBytes)
         val outer = JSONObject()
             .put("format", "hesabyar-garage")
-            .put("schemaVersion", 1)
+            .put("schemaVersion", 6)
             .put("checksum", checksum)
             .put("payload", payload)
             .toString()
@@ -80,7 +81,8 @@ class BackupService(
     private fun decodeEnvelope(bytes: ByteArray, password: CharArray): DecodedEnvelope {
         val plain = BackupCrypto.decrypt(bytes.toString(Charsets.UTF_8), password).toString(Charsets.UTF_8)
         val outer = JSONObject(plain)
-        require(outer.getString("format") == "hesabyar-garage" && outer.getInt("schemaVersion") == 1) { "نسخه فایل پشتیبان پشتیبانی نمی‌شود" }
+        val schemaVersion = outer.getInt("schemaVersion")
+        require(outer.getString("format") == "hesabyar-garage" && schemaVersion in 1..6) { "نسخه فایل پشتیبان پشتیبانی نمی‌شود" }
         val payload = outer.getString("payload")
         val expected = outer.getString("checksum")
         require(BackupCrypto.checksum(payload.toByteArray(Charsets.UTF_8)) == expected) { "صحت فایل پشتیبان تأیید نشد" }
@@ -101,13 +103,19 @@ class BackupService(
             absences = dao.allAbsences(),
             accounts = accounts,
             financialYears = dao.allFinancialYears(),
-            incomeEvents = dao.allIncomeEvents(),
+            incomeEvents = dao.allIncomeEvents().map { event ->
+                event.copy(cardNumberEncrypted = portableCardValue(event.cardNumberEncrypted))
+            },
             eligibility = dao.allEligibilitySnapshots(),
             claims = dao.allClaimPostings(),
             custody = dao.allCustodyPostings(),
-            transfers = dao.allCustodyTransfers(),
+            transfers = dao.allCustodyTransfers().map { transfer ->
+                transfer.copy(cardNumberEncrypted = portableCardValue(transfer.cardNumberEncrypted))
+            },
             transferAllocations = dao.allCustodyTransferAllocations(),
-            settlements = dao.allSettlementPayments(),
+            settlements = dao.allSettlementPayments().map { settlement ->
+                settlement.copy(cardNumberEncrypted = portableCardValue(settlement.cardNumberEncrypted))
+            },
             settlementClaims = dao.allSettlementClaimAllocations(),
             settlementCustody = dao.allSettlementCustodyAllocations(),
             annualCloses = dao.allAnnualCloses(),
@@ -115,6 +123,9 @@ class BackupService(
             auditLogs = dao.allAuditLogs(),
         )
     }
+
+    private fun portableCardValue(encrypted: String): String =
+        if (encrypted.isBlank()) "" else "PLAIN:${cardCrypto.decrypt(encrypted)}"
 
     private suspend fun clearAll() {
         dao.clearAnnualCloseSnapshots(); dao.clearAnnualCloses()
@@ -168,7 +179,16 @@ private data class BackupSnapshot(
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("createdAt", createdAt)
-        .put("settings", JSONObject().put("shopName", settings.shopName).put("onboardingDone", settings.onboardingDone).put("selectedYear", settings.selectedYear).put("lastBackupAt", settings.lastBackupAt).put("lastBackupChecksum", settings.lastBackupChecksum))
+        .put(
+            "settings",
+            JSONObject()
+                .put("shopName", settings.shopName)
+                .put("onboardingDone", settings.onboardingDone)
+                .put("selectedYear", settings.selectedYear)
+                .put("lastBackupAt", settings.lastBackupAt)
+                .put("lastBackupChecksum", settings.lastBackupChecksum)
+                .put("absenceGraceDays", settings.absenceGraceDays),
+        )
         .put("employees", entityArray(employees))
         .put("employmentPeriods", entityArray(employmentPeriods))
         .put("absences", entityArray(absences))
@@ -198,6 +218,15 @@ private data class BackupSnapshot(
                 )
             }
         },
+        incomeEvents = incomeEvents.map { event ->
+            event.copy(cardNumberEncrypted = reEncryptPortableCard(event.cardNumberEncrypted, crypto))
+        },
+        transfers = transfers.map { transfer ->
+            transfer.copy(cardNumberEncrypted = reEncryptPortableCard(transfer.cardNumberEncrypted, crypto))
+        },
+        settlements = settlements.map { settlement ->
+            settlement.copy(cardNumberEncrypted = reEncryptPortableCard(settlement.cardNumberEncrypted, crypto))
+        },
     )
 
     companion object {
@@ -211,6 +240,7 @@ private data class BackupSnapshot(
                     selectedYear = settingsJson.getInt("selectedYear"),
                     lastBackupAt = settingsJson.getLong("lastBackupAt"),
                     lastBackupChecksum = settingsJson.getString("lastBackupChecksum"),
+                    absenceGraceDays = settingsJson.optInt("absenceGraceDays", EligibilityEngine.DEFAULT_GRACE_DAYS),
                 ),
                 employees = decodeArray(root.getJSONArray("employees"), EmployeeEntity::class.java),
                 employmentPeriods = decodeArray(root.getJSONArray("employmentPeriods"), EmploymentPeriodEntity::class.java),
@@ -254,18 +284,18 @@ private fun entityArray(items: List<*>): JSONArray = JSONArray().apply {
  * across JVM/ART implementations.
  */
 internal fun backupFieldNames(clazz: Class<*>): List<String> = when (clazz) {
-    EmployeeEntity::class.java -> listOf("id", "name", "phone", "role", "notes", "createdAt", "archivedAt")
+    EmployeeEntity::class.java -> listOf("id", "name", "phone", "role", "notes", "createdAt", "archivedAt", "sharedIncomeEligible")
     EmploymentPeriodEntity::class.java -> listOf("id", "employeeId", "startEpochDay", "endEpochDay", "createdAt", "voidedAt")
     AbsencePeriodEntity::class.java -> listOf("id", "employeeId", "startEpochDay", "returnEpochDay", "note", "createdAt", "voidedAt")
     MoneyAccountEntity::class.java -> listOf("id", "employeeId", "type", "title", "ownerName", "bankName", "cardNumberEncrypted", "cardLast4", "cardFingerprint", "createdAt", "archivedAt")
     FinancialYearEntity::class.java -> listOf("year", "startEpochDay", "endEpochDay", "status", "createdAt", "closedAt")
-    IncomeEventEntity::class.java -> listOf("id", "commandId", "financialYear", "dateEpochDay", "amount", "type", "receiverEmployeeId", "receiverAccountId", "method", "description", "carriedRemainder", "sharePerPerson", "resultingRemainder", "status", "createdAt", "reversedAt", "replacesEventId")
+    IncomeEventEntity::class.java -> listOf("id", "commandId", "financialYear", "dateEpochDay", "amount", "type", "receiverEmployeeId", "receiverAccountId", "method", "description", "carriedRemainder", "sharePerPerson", "resultingRemainder", "status", "createdAt", "reversedAt", "replacesEventId", "cardNumberEncrypted", "cardLast4", "movementDateEpochDay", "movementTimeMinutes")
     EligibilitySnapshotEntity::class.java -> listOf("id", "eventId", "employeeId", "status", "reasonCode", "reasonFa", "employmentPeriodId", "absencePeriodId", "absenceDay", "shareAmount", "evaluatedAt")
     ClaimPostingEntity::class.java -> listOf("id", "financialYear", "sourceIncomeEventId", "employeeId", "amountSigned", "type", "referenceId", "businessDateEpochDay", "createdAt")
     CustodyPostingEntity::class.java -> listOf("id", "financialYear", "sourceIncomeEventId", "employeeId", "accountId", "amountSigned", "type", "referenceId", "businessDateEpochDay", "createdAt")
-    CustodyTransferEntity::class.java -> listOf("id", "commandId", "financialYear", "dateEpochDay", "fromEmployeeId", "fromAccountId", "toEmployeeId", "toAccountId", "amount", "method", "note", "status", "createdAt", "reversedAt")
+    CustodyTransferEntity::class.java -> listOf("id", "commandId", "financialYear", "dateEpochDay", "fromEmployeeId", "fromAccountId", "toEmployeeId", "toAccountId", "amount", "method", "note", "status", "createdAt", "reversedAt", "cardNumberEncrypted", "cardLast4", "movementDateEpochDay", "movementTimeMinutes", "replacesTransferId")
     CustodyTransferAllocationEntity::class.java -> listOf("transferId", "sourceIncomeEventId", "amount")
-    SettlementPaymentEntity::class.java -> listOf("id", "commandId", "financialYear", "dateEpochDay", "fromEmployeeId", "fromAccountId", "toEmployeeId", "destinationAccountId", "amount", "method", "type", "note", "status", "createdAt", "reversedAt")
+    SettlementPaymentEntity::class.java -> listOf("id", "commandId", "financialYear", "dateEpochDay", "fromEmployeeId", "fromAccountId", "toEmployeeId", "destinationAccountId", "amount", "method", "type", "note", "status", "createdAt", "reversedAt", "cardNumberEncrypted", "cardLast4", "movementDateEpochDay", "movementTimeMinutes", "replacesPaymentId")
     SettlementClaimAllocationEntity::class.java -> listOf("paymentId", "sourceIncomeEventId", "amount")
     SettlementCustodyAllocationEntity::class.java -> listOf("paymentId", "sourceIncomeEventId", "amount")
     AnnualCloseEntity::class.java -> listOf("id", "financialYear", "revision", "closedAt", "ledgerHash", "backupChecksum", "summaryJson", "status", "reversedAt", "reverseReason")
@@ -286,7 +316,8 @@ private fun <T : Any> decodeArray(array: JSONArray, clazz: Class<T>): List<T> = 
             ?: error("سازنده ${clazz.simpleName} برای بازیابی پیدا نشد")
         constructor.isAccessible = true
         val args = fields.map { field ->
-            if (json.isNull(field.name)) null else when {
+            if (!json.has(field.name)) backupMissingFieldDefault(clazz, field.name)
+            else if (json.isNull(field.name)) null else when {
                 field.type == java.lang.Long.TYPE || field.type == java.lang.Long::class.java -> json.getLong(field.name)
                 field.type == java.lang.Integer.TYPE || field.type == java.lang.Integer::class.java -> json.getInt(field.name)
                 field.type == java.lang.Boolean.TYPE || field.type == java.lang.Boolean::class.java -> json.getBoolean(field.name)
@@ -298,4 +329,19 @@ private fun <T : Any> decodeArray(array: JSONArray, clazz: Class<T>): List<T> = 
         @Suppress("UNCHECKED_CAST")
         add(constructor.newInstance(*args) as T)
     }
+}
+
+private fun reEncryptPortableCard(value: String, crypto: CardCrypto): String =
+    if (value.startsWith("PLAIN:")) crypto.encrypt(value.removePrefix("PLAIN:")) else value
+
+private fun backupMissingFieldDefault(clazz: Class<*>, fieldName: String): Any? = when {
+    clazz == EmployeeEntity::class.java && fieldName == "sharedIncomeEligible" -> true
+    (clazz == IncomeEventEntity::class.java && fieldName == "replacesEventId") ||
+        (clazz == CustodyTransferEntity::class.java && fieldName == "replacesTransferId") ||
+        (clazz == SettlementPaymentEntity::class.java && fieldName == "replacesPaymentId") -> null
+    clazz in setOf(IncomeEventEntity::class.java, CustodyTransferEntity::class.java, SettlementPaymentEntity::class.java) &&
+        fieldName in setOf("cardNumberEncrypted", "cardLast4") -> ""
+    clazz in setOf(IncomeEventEntity::class.java, CustodyTransferEntity::class.java, SettlementPaymentEntity::class.java) &&
+        fieldName in setOf("movementDateEpochDay", "movementTimeMinutes") -> null
+    else -> error("فیلد $fieldName در پشتیبان ${clazz.simpleName} وجود ندارد")
 }

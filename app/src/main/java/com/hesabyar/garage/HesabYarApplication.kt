@@ -1,9 +1,11 @@
 package com.hesabyar.garage
 
 import android.app.Application
+import com.hesabyar.garage.data.AppSecurityRepository
 import com.hesabyar.garage.data.GarageRepository
 import com.hesabyar.garage.data.BackupService
 import com.hesabyar.garage.data.SettingsRepository
+import com.hesabyar.garage.data.TransactionDeletionService
 import com.hesabyar.garage.data.local.GarageDatabase
 import com.hesabyar.garage.security.CardCrypto
 
@@ -20,7 +22,9 @@ class HesabYarApplication : Application() {
 class AppContainer(application: Application) {
     val database: GarageDatabase = GarageDatabase.create(application)
     val cardCrypto = CardCrypto()
-    val garageRepository = GarageRepository(database, cardCrypto)
     val settingsRepository = SettingsRepository(application)
+    val appSecurityRepository = AppSecurityRepository(application)
+    internal val garageRepository = GarageRepository(database, cardCrypto, settingsRepository)
+    internal val transactionDeletionService = TransactionDeletionService(appSecurityRepository, garageRepository)
     val backupService = BackupService(application, database, settingsRepository, cardCrypto)
 }

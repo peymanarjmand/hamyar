@@ -1,11 +1,11 @@
 package com.hesabyar.garage.domain
 
 enum class EmployeeRole { BODYWORK, PAINTER, BOTH, OTHER }
-enum class AccountType { CASH, CARD }
+enum class AccountType { CASH, CARD, POS }
 enum class FinancialYearStatus { OPEN, CLOSED }
 enum class IncomeType { TIP, SCRAP }
-enum class MoneyMethod { CASH, CARD }
-enum class RecordStatus { POSTED, REVERSED }
+enum class MoneyMethod { CASH, CARD, POS }
+enum class RecordStatus { POSTED, REVERSED, DELETED }
 enum class EligibilityStatus { ELIGIBLE, NOT_ELIGIBLE }
 enum class SettlementType { PAYMENT, SELF_OFFSET }
 enum class AnnualCloseStatus { FINAL, REVERSED }
@@ -49,8 +49,12 @@ data class PersonBalance(
     val employeeName: String,
     val claim: Long,
     val custody: Long,
+    val totalEntitlement: Long = 0,
+    val settledEntitlement: Long = 0,
 ) {
     val net: Long get() = Math.subtractExact(claim, custody)
+    val selfOffsetNeeded: Long get() = minOf(claim, custody)
+    val isFullySettled: Boolean get() = claim == 0L && custody == 0L
 }
 
 data class SettlementSuggestion(

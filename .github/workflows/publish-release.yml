@@ -1,4 +1,4 @@
-name: Publish signed APK
+name: Publish Play Protect-approved APK
 
 on:
   push:
@@ -6,6 +6,7 @@ on:
       - "v*.*.*"
 
 permissions:
+  actions: read
   contents: write
 
 concurrency:
@@ -14,64 +15,201 @@ concurrency:
 
 jobs:
   publish:
-    name: Verify and publish release
+    name: Verify and publish approved candidate
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    environment: public-release-publishing
 
     steps:
       - name: Check out tagged source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
+      - name: Require tagged commit on main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "Public release tags must point to a commit contained in origin/main" >&2
+            exit 1
+          }
+
       - name: Set up JDK 17
-        uses: actions/setup-java@v5.6.0
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6
 
-      - name: Validate signing secrets
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          test -n "$KEYSTORE_BASE64" || { echo "Missing ANDROID_KEYSTORE_BASE64" >&2; exit 1; }
-          test -n "$KEYSTORE_PASSWORD" || { echo "Missing ANDROID_KEYSTORE_PASSWORD" >&2; exit 1; }
-          test -n "$KEY_ALIAS" || { echo "Missing ANDROID_KEY_ALIAS" >&2; exit 1; }
-          test -n "$KEY_PASSWORD" || { echo "Missing ANDROID_KEY_PASSWORD" >&2; exit 1; }
-
-      - name: Restore release keystore
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/hesabyar-release.jks"
-
-      - name: Test, lint, and build signed release
-        env:
-          HESABYAR_KEYSTORE_PATH: ${{ runner.temp }}/hesabyar-release.jks
-          HESABYAR_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          HESABYAR_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          HESABYAR_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      - name: Verify source tests and lint
         run: |
           chmod +x gradlew
-          ./gradlew clean testDebugUnitTest lintDebug assembleRelease --stacktrace
+          ./gradlew testDebugUnitTest lintDebug assembleDebugAndroidTest --stacktrace
 
-      - name: Verify and package release assets
+      - name: Read approved candidate coordinates
+        id: approval
         run: |
           set -euo pipefail
-          mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk "dist/HesabYar-Garage-${GITHUB_REF_NAME}.apk"
-          cp app/build/outputs/apk/release/app-release.apk "dist/HesabYar-Garage-latest.apk"
-          (cd dist && sha256sum *.apk > SHA256SUMS.txt)
+          RECORD="release/${GITHUB_REF_NAME}/PLAY_PROTECT_APPROVAL.env"
+          test -f "$RECORD" || { echo "Missing Play Protect approval record" >&2; exit 1; }
+
+          read_field() {
+            local key="$1"
+            local values=()
+            mapfile -t values < <(awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1) }' "$RECORD")
+            test "${#values[@]}" -eq 1 || { echo "Expected exactly one $key in approval record" >&2; exit 1; }
+            test -n "${values[0]}" || { echo "Empty approval field: $key" >&2; exit 1; }
+            printf '%s' "${values[0]}"
+          }
+
+          RUN_ID="$(read_field CANDIDATE_RUN_ID)"
+          ARTIFACT_NAME="$(read_field CANDIDATE_ARTIFACT_NAME)"
+          SOURCE_COMMIT="$(read_field SOURCE_COMMIT)"
+
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "CANDIDATE_RUN_ID must be a GitHub Actions run ID" >&2; exit 1; }
+          [[ "$ARTIFACT_NAME" =~ ^hesabyar-public-candidate-v[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$ ]] || {
+            echo "Invalid CANDIDATE_ARTIFACT_NAME" >&2
+            exit 1
+          }
+          [[ "$SOURCE_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]] || { echo "SOURCE_COMMIT must be a full Git SHA" >&2; exit 1; }
+
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+          echo "source_commit=$SOURCE_COMMIT" >> "$GITHUB_OUTPUT"
+
+      - name: Download exact approved candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN_ID: ${{ steps.approval.outputs.run_id }}
+          CANDIDATE_ARTIFACT_NAME: ${{ steps.approval.outputs.artifact_name }}
+          APPROVED_SOURCE_COMMIT: ${{ steps.approval.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          RUN_CONCLUSION="$(gh run view "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --json conclusion --jq .conclusion)"
+          RUN_EVENT="$(gh run view "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --json event --jq .event)"
+          RUN_HEAD_SHA="$(gh run view "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)"
+          RUN_HEAD_BRANCH="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" --jq .head_branch)"
+          RUN_WORKFLOW_ID="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" --jq .workflow_id)"
+          EXPECTED_WORKFLOW_ID="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/prepare-public-release.yml" --jq .id)"
+          test "$RUN_CONCLUSION" = "success" || { echo "Candidate workflow did not succeed" >&2; exit 1; }
+          test "$RUN_EVENT" = "workflow_dispatch" || { echo "Candidate was not created by manual dispatch" >&2; exit 1; }
+          test "$RUN_HEAD_SHA" = "$APPROVED_SOURCE_COMMIT" || { echo "Candidate run source commit mismatch" >&2; exit 1; }
+          test "$RUN_HEAD_BRANCH" = "main" || { echo "Candidate workflow was not dispatched from main" >&2; exit 1; }
+          test "$RUN_WORKFLOW_ID" = "$EXPECTED_WORKFLOW_ID" || { echo "Unexpected candidate workflow identity" >&2; exit 1; }
+          gh run download "$CANDIDATE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$CANDIDATE_ARTIFACT_NAME" \
+            --dir candidate
+
+      - name: Verify and package exact approved APK
+        env:
+          EXPECTED_CERT_SHA256: ${{ secrets.ANDROID_SIGNING_CERT_SHA256 }}
+          APPROVED_RUN_ID: ${{ steps.approval.outputs.run_id }}
+          APPROVED_ARTIFACT_NAME: ${{ steps.approval.outputs.artifact_name }}
+          APPROVED_SOURCE_COMMIT: ${{ steps.approval.outputs.source_commit }}
+        run: |
+          set -euo pipefail
+          test -n "$EXPECTED_CERT_SHA256" || { echo "Missing ANDROID_SIGNING_CERT_SHA256" >&2; exit 1; }
+          test -f candidate/CANDIDATE_METADATA.env || { echo "Missing candidate metadata" >&2; exit 1; }
+
+          mapfile -t APKS < <(find candidate -maxdepth 1 -type f -name '*.apk')
+          test "${#APKS[@]}" -eq 1 || { echo "Expected exactly one candidate APK" >&2; exit 1; }
+          APK="${APKS[0]}"
+
+          read_metadata() {
+            local key="$1"
+            local values=()
+            mapfile -t values < <(awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1) }' candidate/CANDIDATE_METADATA.env)
+            test "${#values[@]}" -eq 1 || { echo "Expected exactly one $key in candidate metadata" >&2; exit 1; }
+            test -n "${values[0]}" || { echo "Empty candidate metadata field: $key" >&2; exit 1; }
+            printf '%s' "${values[0]}"
+          }
+
+          METADATA_SOURCE_COMMIT="$(read_metadata SOURCE_COMMIT)"
+          METADATA_APK_SHA256="$(read_metadata APK_SHA256 | tr '[:upper:]' '[:lower:]')"
+          test "$(read_metadata CANDIDATE_RUN_ID)" = "$APPROVED_RUN_ID" || { echo "Candidate run ID mismatch" >&2; exit 1; }
+          test "$(read_metadata CANDIDATE_ARTIFACT_NAME)" = "$APPROVED_ARTIFACT_NAME" || { echo "Candidate artifact name mismatch" >&2; exit 1; }
+          test "$METADATA_SOURCE_COMMIT" = "$APPROVED_SOURCE_COMMIT" || { echo "Candidate source commit mismatch" >&2; exit 1; }
+          git cat-file -e "${APPROVED_SOURCE_COMMIT}^{commit}"
+          git merge-base --is-ancestor "$APPROVED_SOURCE_COMMIT" "$GITHUB_SHA" || {
+            echo "Tagged source is not descended from the approved candidate" >&2
+            exit 1
+          }
+          if ! git diff --quiet "$APPROVED_SOURCE_COMMIT" "$GITHUB_SHA" -- \
+            app build.gradle.kts settings.gradle.kts gradle.properties gradle/wrapper \
+            gradlew gradlew.bat scripts/verify-apk-permissions.sh scripts/verify-play-protect-approval.sh \
+            .github/workflows/prepare-public-release.yml .github/workflows/publish-release.yml; then
+            echo "App or build inputs changed after the approved candidate was built" >&2
+            exit 1
+          fi
+
+          ACTUAL_APK_SHA256="$(sha256sum "$APK" | awk '{print $1}')"
+          test "$ACTUAL_APK_SHA256" = "$METADATA_APK_SHA256" || { echo "Candidate artifact hash mismatch" >&2; exit 1; }
 
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -n "$APKSIGNER"
-          "$APKSIGNER" verify --verbose "dist/HesabYar-Garage-${GITHUB_REF_NAME}.apk"
+          SIGNATURE_REPORT="$("$APKSIGNER" verify --verbose --print-certs "$APK")"
+          printf '%s\n' "$SIGNATURE_REPORT"
+          printf '%s\n' "$SIGNATURE_REPORT" | grep -Fxq 'Verified using v2 scheme (APK Signature Scheme v2): true' || {
+            echo "Release APK must use APK Signature Scheme v2" >&2
+            exit 1
+          }
+          printf '%s\n' "$SIGNATURE_REPORT" | grep -Fxq 'Number of signers: 1' || {
+            echo "Release APK must have exactly one signer" >&2
+            exit 1
+          }
+          ACTUAL_CERT_SHA256="$(printf '%s\n' "$SIGNATURE_REPORT" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          EXPECTED_CERT_SHA256_NORMALIZED="$(printf '%s' "$EXPECTED_CERT_SHA256" | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          test -n "$ACTUAL_CERT_SHA256" || { echo "Unable to read signer SHA-256" >&2; exit 1; }
+          test "$ACTUAL_CERT_SHA256" = "$EXPECTED_CERT_SHA256_NORMALIZED" || { echo "Unexpected release signer" >&2; exit 1; }
+
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          test -n "$AAPT"
+          BADGING="$("$AAPT" dump badging "$APK")"
+          PACKAGE_LINE="$(printf '%s\n' "$BADGING" | sed -n '/^package:/p' | head -n 1)"
+          ACTUAL_PACKAGE="$(printf '%s' "$PACKAGE_LINE" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
+          ACTUAL_VERSION_NAME="$(printf '%s' "$PACKAGE_LINE" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")"
+          ACTUAL_VERSION_CODE="$(printf '%s' "$PACKAGE_LINE" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")"
+          ACTUAL_MIN_SDK="$(printf '%s' "$BADGING" | sed -n "s/^sdkVersion:'\([^']*\)'.*/\1/p")"
+          ACTUAL_TARGET_SDK="$(printf '%s' "$BADGING" | sed -n "s/^targetSdkVersion:'\([^']*\)'.*/\1/p")"
+
+          test "$(read_metadata PACKAGE_NAME)" = "$ACTUAL_PACKAGE" || { echo "Candidate package metadata mismatch" >&2; exit 1; }
+          test "$(read_metadata VERSION_NAME)" = "$ACTUAL_VERSION_NAME" || { echo "Candidate version-name metadata mismatch" >&2; exit 1; }
+          test "$(read_metadata VERSION_CODE)" = "$ACTUAL_VERSION_CODE" || { echo "Candidate version-code metadata mismatch" >&2; exit 1; }
+          METADATA_SIGNER_SHA256="$(read_metadata SIGNER_CERT_SHA256 | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          test "$METADATA_SIGNER_SHA256" = "$ACTUAL_CERT_SHA256" || { echo "Candidate signer metadata mismatch" >&2; exit 1; }
+
+          test "$ACTUAL_PACKAGE" = "com.hesabyar.garage" || { echo "Unexpected application ID" >&2; exit 1; }
+          test "$ACTUAL_VERSION_NAME" = "${GITHUB_REF_NAME#v}" || { echo "Tag and versionName do not match" >&2; exit 1; }
+          test -f "release/${GITHUB_REF_NAME}/VERSION_CODE.txt" || { echo "Missing version-code record" >&2; exit 1; }
+          EXPECTED_VERSION_CODE="$(tr -d '[:space:]' < "release/${GITHUB_REF_NAME}/VERSION_CODE.txt")"
+          test "$ACTUAL_VERSION_CODE" = "$EXPECTED_VERSION_CODE" || { echo "Unexpected versionCode" >&2; exit 1; }
+          test "$ACTUAL_MIN_SDK" = "26" || { echo "Unexpected minSdk" >&2; exit 1; }
+          test "$ACTUAL_TARGET_SDK" = "36" || { echo "Unexpected targetSdk" >&2; exit 1; }
+          PERMISSION_REPORT="$("$AAPT" dump permissions "$APK")"
+          printf '%s\n' "$PERMISSION_REPORT"
+          printf '%s\n' "$PERMISSION_REPORT" | bash scripts/verify-apk-permissions.sh "$ACTUAL_PACKAGE"
+
+          ZIPALIGN="$(find "$ANDROID_HOME/build-tools" -type f -name zipalign | sort -V | tail -n 1)"
+          test -n "$ZIPALIGN"
+          "$ZIPALIGN" -c -P 16 -v 4 "$APK"
+
+          bash scripts/verify-play-protect-approval.sh \
+            "$APK" \
+            "release/${GITHUB_REF_NAME}/PLAY_PROTECT_APPROVAL.env" \
+            "$ACTUAL_PACKAGE" \
+            "$ACTUAL_VERSION_NAME" \
+            "$ACTUAL_VERSION_CODE" \
+            "$ACTUAL_CERT_SHA256"
+
+          test -f "release/${GITHUB_REF_NAME}/RELEASE_NOTES.md" || { echo "Missing release notes" >&2; exit 1; }
+          mkdir -p dist
+          cp "$APK" "dist/HesabYar-Garage-${GITHUB_REF_NAME}.apk"
+          cp "$APK" dist/HesabYar-Garage-latest.apk
+          (cd dist && sha256sum *.apk > SHA256SUMS.txt)
 
       - name: Create GitHub Release
         env:
@@ -79,10 +217,6 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" dist/* \
             --verify-tag \
-            --generate-notes \
+            --notes-file "release/${GITHUB_REF_NAME}/RELEASE_NOTES.md" \
             --latest \
             --title "HesabYar Garage $GITHUB_REF_NAME"
-
-      - name: Remove signing material
-        if: always()
-        run: rm -f "$RUNNER_TEMP/hesabyar-release.jks"

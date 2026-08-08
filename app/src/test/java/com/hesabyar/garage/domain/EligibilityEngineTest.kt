@@ -34,4 +34,24 @@ class EligibilityEngineTest {
         assertFalse(result.isEligible)
         assertEquals(81, result.absenceDay)
     }
+
+    @Test fun `custom grace days control only the requested boundary`() {
+        val absence = listOf(AbsenceRange(2, 120, null))
+        assertTrue(EligibilityEngine.evaluate(124, employment, absence, graceDays = 5).isEligible)
+        assertFalse(EligibilityEngine.evaluate(125, employment, absence, graceDays = 5).isEligible)
+        assertFalse(EligibilityEngine.evaluate(120, employment, absence, graceDays = 0).isEligible)
+    }
+
+    @Test fun `absence policy reports open and completed status with return day excluded`() {
+        val open = AbsencePolicy.evaluate(startEpochDay = 100, returnEpochDay = null, referenceEpochDay = 105, graceDays = 7)
+        assertEquals(6, open.absentDays)
+        assertEquals(6, open.eligibleDays)
+        assertTrue(open.currentlyEligible == true)
+
+        val completed = AbsencePolicy.evaluate(startEpochDay = 100, returnEpochDay = 110, referenceEpochDay = 200, graceDays = 7)
+        assertEquals(10, completed.absentDays)
+        assertEquals(7, completed.eligibleDays)
+        assertEquals(3, completed.ineligibleDays)
+        assertNull(completed.currentlyEligible)
+    }
 }

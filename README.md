@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="release/onboarding-android15.png" width="320" alt="HesabYar Garage Persian onboarding screen" />
+<img src="release/v1.0.1/screenshots/onboarding-android15.png" width="320" alt="HesabYar Garage Persian onboarding screen" />
 
 # HesabYar Garage
 
@@ -8,7 +8,7 @@
 
 **An offline-first Persian Android application for workforce attendance, shared tip custody, auditable settlements, and Solar Hijri financial-year closing.**
 
-[فارسی](README.fa.md) · [Download latest APK](../../releases/latest/download/HesabYar-Garage-latest.apk) · [User guide](docs/USER_GUIDE_FA.md) · [Accounting model](docs/ACCOUNTING_MODEL_FA.md)
+[فارسی](README.fa.md) · [Download latest APK — after a Release is published](../../releases/latest/download/HesabYar-Garage-latest.apk) · [All releases](../../releases) · [Release/404 guide](docs/RELEASING.md) · [User guide](docs/USER_GUIDE_FA.md)
 
 [![Download APK](https://img.shields.io/badge/Download-latest%20APK-0F766E?style=for-the-badge&logo=android&logoColor=white)](../../releases/latest/download/HesabYar-Garage-latest.apk)
 
@@ -30,23 +30,27 @@ This is deliberately more than a CRUD application. It separates **what each empl
 
 | Area | What the application handles |
 | --- | --- |
-| Workforce | Personnel profiles, phone numbers, roles, multiple employment periods, temporary absences, and fast validated Solar Hijri date entry |
-| Eligibility | Equal sharing with an immutable decision snapshot for every employee at every income event |
-| Income | Customer tips and scrap-sale proceeds, received as cash or into a selected bank card |
-| Custody | Partial or full money transfers between people and cash/card accounts with FIFO source allocation |
-| Settlement | Live debtor/creditor balances, minimal payment suggestions, internal offsets, and real payments |
-| History | Per-person and per-event audit trails, including why somebody did or did not receive a share |
+| Workforce | Editable personnel profiles, phone numbers, roles, notes, employment periods, temporary absences, and fast validated Solar Hijri date entry |
+| Eligibility | Per-person shared-income participation, configurable absence grace days, and an immutable decision snapshot for every employee at every event |
+| Income | Customer tips and scrap-sale proceeds with explicit cash, card-transfer, or POS receipt and optional transaction details |
+| Custody | Partial or full money transfers between people with an explicit method and FIFO source allocation |
+| Settlement | Live debtor/creditor balances, minimal suggestions, internal offsets, and real cash/card-transfer payments |
+| History | Per-person/per-event audit trails, flexible append-only correction, and password-protected audited deletion of income, transfer, and settlement records |
 | Financial years | Final Solar Hijri year close, read-only historical years, and controlled remainder rollover |
-| Resilience | Fully offline Room database and password-encrypted portable backups through Android's Storage Access Framework |
+| Resilience | Fully offline Room database, optional local app/password/device lock, and password-encrypted portable backups through Android's Storage Access Framework |
 
 ## Accounting rules and invariants
 
 - Money is stored as integer **Tomans** using `Long`; floating-point arithmetic is never used.
 - Employment dates are inclusive and a return date counts as present.
-- Absence days 1–14 remain eligible; day 15 onward is ineligible until return.
+- The absence grace period is configurable from 0 to 365 days and defaults to 14; a return date counts as present.
+- Each employee can be excluded from future tip and scrap shares while remaining able to receive, hold, and transfer shared money.
 - Eligibility snapshots are immutable after an income event is posted.
 - Claim postings, custody postings, and settlement payments are separate ledgers.
 - Partial custody transfers retain FIFO links to their original tip or scrap-sale events.
+- Transaction correction never overwrites history: the original is reversed, opposite postings cancel it, and one audited replacement is linked to it. Correcting an older income atomically replays the affected newer income suffix while preserving frozen eligibility decisions and all source/remainder invariants.
+- Transaction deletion is an audited financial reversal, not a physical row removal. The inactive record and deletion reason remain visible in history while its effect is excluded from active accounting.
+- POS is an offline income-receipt classification only; it does not connect to a terminal, bank, or payment network.
 - The sum of claims and the sum of custody remain balanced after income, transfer, and settlement operations.
 - A financial year can close only after its end, after claims are settled, and after a final verified backup.
 
@@ -65,6 +69,10 @@ flowchart LR
 ## Privacy and security
 
 - The manifest requests **no Internet permission**.
+- App locking is optional and disabled by default. Password/recovery plaintext is not stored; salted PBKDF2 verifiers and persistent attempt throttling stay in a separate device-local DataStore excluded from financial backups.
+- Every transaction deletion requires the exact app password. If no app password is configured, the deletion action directs the user to enable the optional app lock first; device authentication and an already-unlocked session do not replace this confirmation.
+- Optional fingerprint/face/device-credential unlock uses Android's system `BiometricPrompt`; the app receives only the result and never biometric templates, device PINs, patterns, or passwords.
+- Protected content is not composed until security state is loaded and the current process session is unlocked; Android Recents previews are suppressed while locking is enabled.
 - Full card numbers are encrypted at rest with AES-GCM keys held by Android Keystore.
 - Card numbers are masked by default and revealed only on explicit user action.
 - Portable backups use password-based key derivation, AES-GCM authenticated encryption, and SHA-256 integrity checks.
@@ -93,28 +101,31 @@ Core technologies:
 - Jetpack Compose and Material 3
 - Room with exported schema and transactional repositories
 - Preferences DataStore
+- AndroidX BiometricPrompt and PBKDF2 app-access verifiers
 - Android Keystore and Storage Access Framework
 - Gradle 8.13, AGP 8.13, min SDK 26, target/compile SDK 36
 
 ## Quality evidence
 
-- 23 JVM tests across eligibility boundaries, accounting invariants, personnel-list key safety, Jalali input/conversion, card validation, backup cryptography, and backup schema contracts
-- 4 Android instrumentation tests covering a real Room/Keystore stack plus month/day dropdowns and multilingual numeric date input
+- JVM coverage includes configurable eligibility boundaries, accounting invariants, flexible income-suffix correction, app-lock state and recovery-code visibility, deletion retry timing, navigation planning, movement-time parsing, Jalali input/conversion, card validation, backup cryptography, and schema contracts.
+- Android instrumentation coverage includes Room migrations 1→4, 2→4, and 3→4; a real Room/DataStore/Keystore stack; exact-password transaction deletion and persistent throttling; backup schemas 1..6 including legacy fixtures; POS income; atomic correction/deletion rollback and replay; correction-safe annual-close snapshots; RTL controls; dashboard scrolling; Persian date input; and privacy acceptance.
 - Password-encrypted backup → database wipe → full restore tested on Android 15
 - Partial custody transfer and balanced claim/custody totals tested on Android 15
 - `lintDebug` passes without errors
-- Minified Release APK verified and updated in place from 1.0.0 to 1.0.1 on Android 15 without losing seeded personnel data
+- Version 1.4.1 local evidence: 47 JVM tests and 35 connected Android tests pass; the exact local permanent-signed APK was signature/alignment/permission verified and installed in place over exact 1.4.0 while preserving synthetic personnel, balances, and history. Protected-workflow provenance, VirusTotal, certified-device Play Protect, and public publication remain separate and pending.
 - Universal APK contains `arm64-v8a`, `armeabi-v7a`, `x86`, and `x86_64`
 
-See the full [test report](docs/TEST_REPORT.md) and [delivery audit](docs/COMPLETION_AUDIT.md).
+See the full [test report](docs/TEST_REPORT.md) and the pending versioned [1.4.1 release record](release/v1.4.1/RELEASE_RECORD.md).
 
 ## Download and install
 
 [**Download the latest APK directly from GitHub Releases**](../../releases/latest/download/HesabYar-Garage-latest.apk)
 
-The stable link above always targets the asset named `HesabYar-Garage-latest.apk` in the latest published release. Android may ask you to allow installation from your browser or file manager. The application supports Android 8.0 and newer.
+The stable link works only after GitHub has a published Release marked as latest and that Release contains an asset named exactly `HesabYar-Garage-latest.apk`. A local tag, a pushed `main` branch, or a successful Android CI run does not create this download. If the link returns 404, inspect [all Releases](../../releases) and follow the [release and 404 recovery guide](docs/RELEASING.md#رفع-خطای-فعلی-۴۰۴-دانلود).
 
-For Persian installation instructions, see [release/راهنمای-نصب.md](release/راهنمای-نصب.md).
+Once published, Android may ask you to allow installation from your browser or file manager. The application supports Android 8.0 and newer.
+
+For Persian 1.4.1 installation and data-preservation instructions, see [release/v1.4.1/INSTALL_FA.md](release/v1.4.1/INSTALL_FA.md). No 1.4.1 public APK is authorized until its exact-file release record is complete.
 
 ## Build from source
 
@@ -127,12 +138,12 @@ Requirements:
 ```bash
 git clone <repository-url>
 cd hesabyar-garage-android
-./gradlew testDebugUnitTest lintDebug assembleRelease
+./gradlew testDebugUnitTest lintDebug assembleDebugAndroidTest assembleRelease
 ```
 
 On Windows PowerShell, use `./gradlew.bat` instead of `./gradlew`.
 
-The APK is generated at `app/build/outputs/apk/release/app-release.apk`. Production releases should always be signed with the same private release key; signing keys and credentials must never be committed.
+With permanent signing configured, the APK is generated at `app/build/outputs/apk/release/app-release.apk`; without it, `assembleRelease` intentionally produces `app-release-unsigned.apk`. A distributable artifact must be built with the protected `assemblePublicRelease` task, use the same securely backed-up permanent private key for every version, and match the pinned certificate SHA-256 fingerprint. Signing keys and credentials must never be committed.
 
 ## Repository documentation
 
@@ -140,6 +151,9 @@ The APK is generated at `app/build/outputs/apk/release/app-release.apk`. Product
 - [Accounting model and invariants](docs/ACCOUNTING_MODEL_FA.md)
 - [Test report](docs/TEST_REPORT.md)
 - [Release process](docs/RELEASING.md)
+- [Cafe Bazaar release guide (Persian)](docs/CAFE_BAZAAR_RELEASE_FA.md)
+- [Privacy policy (Persian)](docs/PRIVACY_POLICY_FA.md)
+- [GitHub Releases](../../releases)
 - [Contributing guide](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 - [Changelog](CHANGELOG.md)
@@ -154,4 +168,4 @@ Released under the [MIT License](LICENSE).
 
 ## Author
 
-Designed and developed by **Peyman Arjmand**.
+Designed and developed by **Peyman Arjmand** — [email](mailto:peymanarjmand308@gmail.com), [Bale](https://ble.ir/peyman_arjmand), [Telegram](https://t.me/Peymanarjmand77).
